@@ -1,0 +1,118 @@
+name: rocky
+description: "Rocky Linux LXC Template with Cloud-Init"
+config:
+  boot.autostart: "true"
+  cloud-init.ssh-keys.creeksidenetworks: root:ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHrPVbtdHf0aJeRu49fm/lLQPxopvvz6NZZqqGB+bcocZUW3Hw8bflhouTsJ+S4Z3v7L/F6mmZhXU1U3PqUXLVTE4eFMfnDjBlpOl0VDQoy9aT60C1Sreo469FB0XQQYS5CyIWW5C5rQQzgh1Ov8EaoXVGgW07GHUQCg/cmOBIgFvJym/Jmye4j2ALe641jnCE98yE4mPur7AWIs7n7W8DlvfEVp4pnreqKtlnfMqoOSTVl2v81gnp4H3lqGyjjK0Uku72GKUkAwZRD8BIxbA75oBEr3f6Klda2N88uwz4+3muLZpQParYQ+BhOTvldMMXnhqM9kHhvFZb21jTWV7p
+  cloud-init.user-data: |
+    #cloud-config
+    users:
+      - name: root
+        lock_passwd: false
+        password: "$6$RziNmrrAX1TkojXv$f//EXBGyP.KYC3joWhTMGM/CwS9rkC9xnTyt8Yr5qwkAcmM4rSpyIcMq/FE2KwH/9UOZHK/oFobj1ZV8OOVvG1"
+        ssh_authorized_keys:
+          - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHrPVbtdHf0aJeRu49fm/lLQPxopvvz6NZZqqGB+bcocZUW3Hw8bflhouTsJ+S4Z3v7L/F6mmZhXU1U3PqUXLVTE4eFMfnDjBlpOl0VDQoy9aT60C1Sreo469FB0XQQYS5CyIWW5C5rQQzgh1Ov8EaoXVGgW07GHUQCg/cmOBIgFvJym/Jmye4j2ALe641jnCE98yE4mPur7AWIs7n7W8DlvfEVp4pnreqKtlnfMqoOSTVl2v81gnp4H3lqGyjjK0Uku72GKUkAwZRD8BIxbA75oBEr3f6Klda2N88uwz4+3muLZpQParYQ+BhOTvldMMXnhqM9kHhvFZb21jTWV7p creeksidenetworks@gmail.com
+      - name: admin
+        groups: [wheel, docker]
+        sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+        shell: /bin/bash
+        lock_passwd: false
+        password: "$6$RziNmrrAX1TkojXv$f//EXBGyP.KYC3joWhTMGM/CwS9rkC9xnTyt8Yr5qwkAcmM4rSpyIcMq/FE2KwH/9UOZHK/oFobj1ZV8OOVvG1"
+        ssh_authorized_keys:
+          - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDHrPVbtdHf0aJeRu49fm/lLQPxopvvz6NZZqqGB+bcocZUW3Hw8bflhouTsJ+S4Z3v7L/F6mmZhXU1U3PqUXLVTE4eFMfnDjBlpOl0VDQoy9aT60C1Sreo469FB0XQQYS5CyIWW5C5rQQzgh1Ov8EaoXVGgW07GHUQCg/cmOBIgFvJym/Jmye4j2ALe641jnCE98yE4mPur7AWIs7n7W8DlvfEVp4pnreqKtlnfMqoOSTVl2v81gnp4H3lqGyjjK0Uku72GKUkAwZRD8BIxbA75oBEr3f6Klda2N88uwz4+3muLZpQParYQ+BhOTvldMMXnhqM9kHhvFZb21jTWV7p creeksidenetworks@gmail.com
+    yum_repos:
+      epel:
+        name: Extra Packages for Enterprise Linux 9 - $basearch
+        metalink: https://mirrors.fedoraproject.org/metalink?repo=epel-9&arch=$basearch&infra=$infra&content=$contentdir
+        enabled: true
+        gpgcheck: true
+        gpgkey: https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-9
+      docker-ce-stable:
+        name: Docker CE Stable - $basearch
+        baseurl: https://download.docker.com/linux/centos/9/$basearch/stable
+        enabled: true
+        gpgcheck: true
+        gpgkey: https://download.docker.com/linux/centos/gpg
+    packages:
+      - zsh
+      - ksh
+      - tcsh
+      - xterm
+      - ethtool
+      - vim
+      - yum-utils
+      - util-linux
+      - tree
+      - nano
+      - ed
+      - fontconfig
+      - nedit
+      - htop
+      - pwgen
+      - nfs-utils
+      - cifs-utils
+      - samba-client
+      - autofs
+      - subversion
+      - ansible
+      - iperf3
+      - traceroute
+      - mtr
+      - rsnapshot
+      - tar
+      - zip
+      - unzip
+      - p7zip
+      - p7zip-plugins
+      - cabextract
+      - rsync
+      - curl
+      - ftp
+      - wget
+      - telnet
+      - jq
+      - lsof
+      - bind-utils
+      - tcpdump
+      - net-tools
+      - openssl
+      - cyrus-sasl
+      - cyrus-sasl-plain
+      - cyrus-sasl-ldap
+      - openldap-clients
+      - ipa-client
+      - sssd
+      - realmd
+      - oddjob
+      - oddjob-mkhomedir
+      - adcli
+      - samba-common
+      - samba-common-tools
+      - krb5-workstation
+      - firewalld
+      - dnf-plugins-core
+      - policycoreutils-python-utils
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+
+    runcmd:
+      - [ dnf, config-manager, --set-enabled, crb ]
+      - [ systemctl, enable, --now, firewalld ]
+      - [ firewall-cmd, --permanent, --add-service, ssh ]
+      - [ firewall-cmd, --reload ]
+      - [ systemctl, enable, --now, docker ]
+  limits.cpu: "2"
+  limits.memory: 4GiB
+  security.nesting: "true"
+  security.syscalls.intercept.mknod: "true"
+  security.syscalls.intercept.setxattr: "true"
+devices:
+  root:
+    path: /
+    pool: remote
+    size: 20GiB
+    type: disk
+used_by: []
+project: default
