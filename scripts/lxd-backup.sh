@@ -44,6 +44,11 @@ lxc list --all-projects --format csv -c n,P | while IFS=, read -r INSTANCE PROJE
     IMG_ALIAS="img-backup-${INSTANCE}-${DATE}"
     BACKUP_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}.tar.gz"
     
+    if [ -f "$BACKUP_FILE" ]; then
+        echo "  > Backup already exists for today. Skipping."
+        continue
+    fi
+    
     # 1. Create Snapshot
     # Create a stateless snapshot (disk only, no memory state)
     lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT"
