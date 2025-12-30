@@ -61,22 +61,39 @@ lxc list --all-projects --format csv -c n,P | while IFS=, read -r INSTANCE PROJE
         continue
     fi
     
+    # Pre-cleanup: Remove potential leftovers from failed runs
+    lxc image delete "$IMG_ALIAS" --project "$PROJECT" >/dev/null 2>&1 || true
+    lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" >/dev/null 2>&1 || true
+    
     # 1. Create Snapshot
     # Create a stateless snapshot (disk only, no memory state)
-    lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT" < /dev/null
+    if ! lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT" < /dev/null; then
+        log "ERROR: Failed to create snapshot for $INSTANCE. Skipping."
+        continue
+    fi
     
     # 2. Publish Snapshot to Image
     # Creates a unified image (metadata + rootfs)
-    lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip < /dev/null
+    if ! lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip < /dev/null; then
+        log "ERROR: Failed to publish image for $INSTANCE. Cleaning up snapshot."
+        lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" >/dev/null 2>&1 || true
+        continue
+    fi
     
     # 3. Export Image to Backup File
-    lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT" < /dev/null
+    EXPORT_SUCCESS=true
+    if ! lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT" < /dev/null; then
+        log "ERROR: Failed to export image for $INSTANCE."
+        EXPORT_SUCCESS=false
+    else
+        log "INFO:   > Saved to: $BACKUP_FILE"
+    fi
     
     # 4. Cleanup Temporary Image and Snapshot
-    lxc image delete "$IMG_ALIAS" --project "$PROJECT" < /dev/null
-    lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" < /dev/null
-    
-    log "INFO:   > Saved to: $BACKUP_FILE"
+    lxc image delete "$IMG_ALIAS" --project "$PROJECT" >/dev/null 2>&1 || true
+    lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" >/dev/null 2>&1 || true
+
+    [ "$EXPORT_SUCCESS" = "false" ] && continue
 
     # Handle Weekly Retention (Sunday)
     if [ "$DAY_OF_WEEK" -eq 7 ]; then
