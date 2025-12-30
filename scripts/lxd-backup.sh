@@ -52,8 +52,10 @@ log "INFO: === Starting LXD Backup: $DATE ==="
 lxc list --all-projects --format csv -c n,P | while IFS=, read -r INSTANCE PROJECT; do
     log "INFO: Backing up instance: $INSTANCE (Project: $PROJECT)"
     
-    SNAP_NAME="snap-backup-${DATE}"
-    IMG_ALIAS="img-backup-${INSTANCE}-${DATE}"
+    # Use timestamp to avoid Ceph/RBD collisions on retries
+    TS=$(date +%H%M%S)
+    SNAP_NAME="snap-backup-${DATE}-${TS}"
+    IMG_ALIAS="img-backup-${INSTANCE}-${DATE}-${TS}"
     BACKUP_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}.tar.gz"
     
     if [ -f "$BACKUP_FILE" ]; then
