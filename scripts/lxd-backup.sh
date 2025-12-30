@@ -1,13 +1,16 @@
 #!/bin/bash
 # LXD Backup Script for VMs & Containers
-# Backups are saved to /mnt/backups
+# Backups are saved to /mnt/backups (configurable via LXD_BACKUP_ROOT)
 # Retention: 7 Daily, 4 Weekly (Sundays)
 
-set -u
+set -uo pipefail
 
-# Configuration
-BACKUP_ROOT="/mnt/backups"
-LOG_FILE="/var/log/lxd-backup.log"
+# Error trapping
+trap 'log "ERROR: Script failed at line $LINENO"' ERR
+
+# Configuration (can be overridden via environment variables)
+BACKUP_ROOT="${LXD_BACKUP_ROOT:-/mnt/backups}"
+LOG_FILE="${LXD_BACKUP_LOG:-/var/log/lxd-backup.log}"
 MAX_LOG_LINES=5000
 DAILY_DIR="${BACKUP_ROOT}/daily"
 WEEKLY_DIR="${BACKUP_ROOT}/weekly"
@@ -26,6 +29,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # Setup Logging
+touch "$LOG_FILE" 2>/dev/null || true
 if [ -f "$LOG_FILE" ]; then
     tail -n "$MAX_LOG_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
 fi
@@ -45,20 +49,29 @@ fi
 # Create backup directories
 mkdir -p "$DAILY_DIR" "$WEEKLY_DIR"
 
+# Check available disk space (require at least 50GB)
+MIN_SPACE_GB="${LXD_BACKUP_MIN_SPACE_GB:-50}"
+AVAILABLE_KB=$(df "$BACKUP_ROOT" | tail -1 | awk '{print $4}')
+if [ "$AVAILABLE_KB" -lt $((MIN_SPACE_GB * 1024 * 1024)) ]; then
+    log "ERROR: Insufficient disk space. Required: ${MIN_SPACE_GB}GB, Available: $((AVAILABLE_KB / 1024 / 1024))GB"
+    exit 1
+fi
+
 log "INFO: === Starting LXD Backup: $DATE ==="
 
 # Get list of all instances across all projects
 # Format: Name,Project
-lxc list --all-projects --format csv -c n,P | sort -u | while IFS=, read -r INSTANCE PROJECT; do
+while IFS=, read -r INSTANCE PROJECT; do
     log "INFO: Backing up instance: $INSTANCE (Project: $PROJECT)"
     
     # Use timestamp to avoid Ceph/RBD collisions on retries
     TS=$(date +%H%M%S)
     SNAP_NAME="snap-backup-${DATE}-${TS}"
     IMG_ALIAS="img-backup-${INSTANCE}-${DATE}-${TS}"
-    BACKUP_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}.tar.gz"
+    # Note: lxc image export automatically adds .tar.gz extension
+    BACKUP_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}"
     
-    if [ -f "$BACKUP_FILE" ]; then
+    if [ -f "${BACKUP_FILE}.tar.gz" ]; then
         log "INFO:   > Backup already exists for today. Skipping."
         continue
     fi
@@ -69,14 +82,16 @@ lxc list --all-projects --format csv -c n,P | sort -u | while IFS=, read -r INST
     
     # 1. Create Snapshot
     # Create a stateless snapshot (disk only, no memory state)
-    if ! lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT" < /dev/null; then
+    log "INFO:   > Creating snapshot..."
+    if ! timeout 300 lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT" < /dev/null; then
         log "ERROR: Failed to create snapshot for $INSTANCE. Skipping."
         continue
     fi
     
     # 2. Publish Snapshot to Image
     # Creates a unified image (metadata + rootfs)
-    if ! lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip < /dev/null; then
+    log "INFO:   > Publishing image (compression in progress)..."
+    if ! timeout 3600 lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip < /dev/null; then
         log "ERROR: Failed to publish image for $INSTANCE. Cleaning up snapshot."
         lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" >/dev/null 2>&1 || true
         continue
@@ -84,11 +99,12 @@ lxc list --all-projects --format csv -c n,P | sort -u | while IFS=, read -r INST
     
     # 3. Export Image to Backup File
     EXPORT_SUCCESS=true
-    if ! lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT" < /dev/null; then
+    log "INFO:   > Exporting image to file..."
+    if ! timeout 3600 lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT" < /dev/null; then
         log "ERROR: Failed to export image for $INSTANCE."
         EXPORT_SUCCESS=false
     else
-        log "INFO:   > Saved to: $BACKUP_FILE"
+        log "INFO:   > Saved to: ${BACKUP_FILE}.tar.gz"
     fi
     
     # 4. Cleanup Temporary Image and Snapshot
@@ -100,9 +116,11 @@ lxc list --all-projects --format csv -c n,P | sort -u | while IFS=, read -r INST
     # Handle Weekly Retention (Sunday)
     if [ "$DAY_OF_WEEK" -eq 7 ]; then
         log "INFO:   > Sunday detected. Copying to weekly archive..."
-        cp "$BACKUP_FILE" "${WEEKLY_DIR}/${INSTANCE}_${DATE}.tar.gz"
+        if ! cp "${BACKUP_FILE}.tar.gz" "${WEEKLY_DIR}/${INSTANCE}_${DATE}.tar.gz"; then
+            log "ERROR: Failed to copy weekly backup for $INSTANCE"
+        fi
     fi
-done
+done < <(lxc list --all-projects --format csv -c n,P | sort -u)
 
 log "INFO: === Running Retention Policy ==="
 
@@ -112,8 +130,10 @@ find "$DAILY_DIR" -type f -name "*.tar.gz" -mtime +7 -print -delete
 
 # Weekly: Keep 4 copies per instance
 log "INFO: Cleaning up old weekly backups (keeping latest 4)..."
-# We need to re-fetch the instance list or just iterate over files in the directory to avoid complexity
-find "$WEEKLY_DIR" -name "*_*.tar.gz" | sed -E 's/.*\/([^_]+)_[0-9-]+\.tar\.gz/\1/' | sort -u | while read -r INSTANCE; do
+# Extract instance names by removing the date suffix (handles underscores in names)
+# Pattern: INSTANCE_YYYY-MM-DD.tar.gz -> extract everything before _YYYY-MM-DD
+find "$WEEKLY_DIR" -name "*_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].tar.gz" -printf '%f\n' | \
+    sed -E 's/_[0-9]{4}-[0-9]{2}-[0-9]{2}\.tar\.gz$//' | sort -u | while read -r INSTANCE; do
     # List files for this instance, sort by time (newest first), skip first 4, delete the rest
     ls -t "${WEEKLY_DIR}/${INSTANCE}_"*.tar.gz 2>/dev/null | tail -n +5 | xargs -r rm --
 done
