@@ -35,11 +35,10 @@ mkdir -p "$DAILY_DIR" "$WEEKLY_DIR"
 
 echo "=== Starting LXD Backup: $DATE ==="
 
-# Get list of all instances (containers and VMs)
-INSTANCES=$(lxc list --format csv -c n)
-
-for INSTANCE in $INSTANCES; do
-    echo "Backing up instance: $INSTANCE"
+# Get list of all instances across all projects
+# Format: Name,Project
+lxc list --all-projects --format csv -c n,P | while IFS=, read -r INSTANCE PROJECT; do
+    echo "Backing up instance: $INSTANCE (Project: $PROJECT)"
     
     SNAP_NAME="snap-backup-${DATE}"
     IMG_ALIAS="img-backup-${INSTANCE}-${DATE}"
@@ -47,18 +46,18 @@ for INSTANCE in $INSTANCES; do
     
     # 1. Create Snapshot
     # Create a stateless snapshot (disk only, no memory state)
-    lxc snapshot "$INSTANCE" "$SNAP_NAME"
+    lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT"
     
     # 2. Publish Snapshot to Image
     # Creates a unified image (metadata + rootfs)
-    lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --compression gzip
+    lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip
     
     # 3. Export Image to Backup File
-    lxc image export "$IMG_ALIAS" "$BACKUP_FILE"
+    lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT"
     
     # 4. Cleanup Temporary Image and Snapshot
-    lxc image delete "$IMG_ALIAS"
-    lxc delete "$INSTANCE/$SNAP_NAME"
+    lxc image delete "$IMG_ALIAS" --project "$PROJECT"
+    lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT"
     
     echo "  > Saved to: $BACKUP_FILE"
 
@@ -77,7 +76,8 @@ find "$DAILY_DIR" -type f -name "*.tar.gz" -mtime +7 -print -delete
 
 # Weekly: Keep 4 copies per instance
 echo "Cleaning up old weekly backups (keeping latest 4)..."
-for INSTANCE in $INSTANCES; do
+# We need to re-fetch the instance list or just iterate over files in the directory to avoid complexity
+find "$WEEKLY_DIR" -name "*_*.tar.gz" | sed -E 's/.*\/([^_]+)_[0-9-]+\.tar\.gz/\1/' | sort -u | while read -r INSTANCE; do
     # List files for this instance, sort by time (newest first), skip first 4, delete the rest
     ls -t "${WEEKLY_DIR}/${INSTANCE}_"*.tar.gz 2>/dev/null | tail -n +5 | xargs -r rm --
 done
