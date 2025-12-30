@@ -64,18 +64,18 @@ lxc list --all-projects --format csv -c n,P | while IFS=, read -r INSTANCE PROJE
     
     # 1. Create Snapshot
     # Create a stateless snapshot (disk only, no memory state)
-    lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT"
+    lxc snapshot "$INSTANCE" "$SNAP_NAME" --project "$PROJECT" < /dev/null
     
     # 2. Publish Snapshot to Image
     # Creates a unified image (metadata + rootfs)
-    lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip
+    lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip < /dev/null
     
     # 3. Export Image to Backup File
-    lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT"
+    lxc image export "$IMG_ALIAS" "$BACKUP_FILE" --project "$PROJECT" < /dev/null
     
     # 4. Cleanup Temporary Image and Snapshot
-    lxc image delete "$IMG_ALIAS" --project "$PROJECT"
-    lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT"
+    lxc image delete "$IMG_ALIAS" --project "$PROJECT" < /dev/null
+    lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" < /dev/null
     
     log "INFO:   > Saved to: $BACKUP_FILE"
 
