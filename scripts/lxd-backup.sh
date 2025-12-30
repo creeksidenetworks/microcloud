@@ -49,7 +49,7 @@ log "INFO: === Starting LXD Backup: $DATE ==="
 
 # Get list of all instances across all projects
 # Format: Name,Project
-lxc list --all-projects --format csv -c n,P | while IFS=, read -r INSTANCE PROJECT; do
+lxc list --all-projects --format csv -c n,P | sort -u | while IFS=, read -r INSTANCE PROJECT; do
     log "INFO: Backing up instance: $INSTANCE (Project: $PROJECT)"
     
     # Use timestamp to avoid Ceph/RBD collisions on retries
