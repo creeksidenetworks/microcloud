@@ -16,7 +16,7 @@ DAY_OF_WEEK=$(date +%u) # 1=Monday, 7=Sunday
 
 # Logging function
 log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" | tee -a "$LOG_FILE"
 }
 
 # Ensure running as root
@@ -29,7 +29,6 @@ fi
 if [ -f "$LOG_FILE" ]; then
     tail -n "$MAX_LOG_LINES" "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
 fi
-exec >> "$LOG_FILE" 2>&1
 
 # Check for lxc command
 if ! command -v lxc &> /dev/null; then
