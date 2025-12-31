@@ -59,6 +59,22 @@ if [ "$AVAILABLE_KB" -lt $((MIN_SPACE_GB * 1024 * 1024)) ]; then
     exit 1
 fi
 
+# Function to clean up stale LXD operations (image tokens from failed backups)
+cleanup_stale_operations() {
+    local count=0
+    while IFS=, read -r op_id op_type op_desc op_status op_cancelable _; do
+        # Only cancel TOKEN operations that are cancelable
+        if [ "$op_type" = "TOKEN" ] && [ "$op_cancelable" = "YES" ]; then
+            if lxc operation delete "$op_id" 2>/dev/null; then
+                ((count++)) || true
+            fi
+        fi
+    done < <(lxc operation list --format csv 2>/dev/null)
+    if [ "$count" -gt 0 ]; then
+        log "INFO: Cleaned up $count stale operations"
+    fi
+}
+
 log "INFO: === Starting LXD Backup: $DATE ==="
 
 # Get list of all instances across all projects
@@ -71,10 +87,12 @@ while IFS=, read -r INSTANCE PROJECT; do
     SNAP_NAME="snap-backup-${DATE}-${TS}"
     IMG_ALIAS="img-backup-${INSTANCE}-${DATE}-${TS}"
     # Note: lxc image export automatically adds .tar.gz extension
-    BACKUP_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}"
+    # Filename format: PROJECT@INSTANCE_DATE.tar.gz (e.g., default@myvm_2025-12-31.tar.gz)
+    BACKUP_FILE="${DAILY_DIR}/${PROJECT}@${INSTANCE}_${DATE}"
     
-    # Check for existing backup (handles both old double-extension and new correct format)
-    if [ -f "${BACKUP_FILE}.tar.gz" ] || [ -f "${BACKUP_FILE}.tar.gz.tar.gz" ]; then
+    # Check for existing backup (handles old formats without project prefix)
+    OLD_FORMAT_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}"
+    if [ -f "${BACKUP_FILE}.tar.gz" ] || [ -f "${OLD_FORMAT_FILE}.tar.gz" ] || [ -f "${OLD_FORMAT_FILE}.tar.gz.tar.gz" ]; then
         log "INFO:   > Backup already exists for today. Skipping."
         continue
     fi
@@ -119,7 +137,7 @@ while IFS=, read -r INSTANCE PROJECT; do
     # Handle Weekly Retention (Sunday)
     if [ "$DAY_OF_WEEK" -eq 7 ]; then
         log "INFO:   > Sunday detected. Copying to weekly archive..."
-        if ! cp "${BACKUP_FILE}.tar.gz" "${WEEKLY_DIR}/${INSTANCE}_${DATE}.tar.gz"; then
+        if ! cp "${BACKUP_FILE}.tar.gz" "${WEEKLY_DIR}/${PROJECT}@${INSTANCE}_${DATE}.tar.gz"; then
             log "ERROR: Failed to copy weekly backup for $INSTANCE"
         fi
     fi
@@ -131,14 +149,18 @@ log "INFO: === Running Retention Policy ==="
 log "INFO: Cleaning up daily backups older than 7 days..."
 find "$DAILY_DIR" -type f -name "*.tar.gz" -mtime +7 -print -delete
 
-# Weekly: Keep 4 copies per instance
-log "INFO: Cleaning up old weekly backups (keeping latest 4)..."
-# Extract instance names by removing the date suffix (handles underscores in names)
-# Pattern: INSTANCE_YYYY-MM-DD.tar.gz -> extract everything before _YYYY-MM-DD
+# Weekly: Keep 4 copies per instance (per project)
+log "INFO: Cleaning up old weekly backups (keeping latest 4 per instance)..."
+# Extract PROJECT@INSTANCE prefix by removing the date suffix
+# Pattern: PROJECT@INSTANCE_YYYY-MM-DD.tar.gz -> extract PROJECT@INSTANCE
 find "$WEEKLY_DIR" -name "*_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].tar.gz" -printf '%f\n' | \
-    sed -E 's/_[0-9]{4}-[0-9]{2}-[0-9]{2}\.tar\.gz$//' | sort -u | while read -r INSTANCE; do
-    # List files for this instance, sort by time (newest first), skip first 4, delete the rest
-    ls -t "${WEEKLY_DIR}/${INSTANCE}_"*.tar.gz 2>/dev/null | tail -n +5 | xargs -r rm --
+    sed -E 's/_[0-9]{4}-[0-9]{2}-[0-9]{2}\.tar\.gz$//' | sort -u | while read -r PREFIX; do
+    # List files for this project@instance, sort by time (newest first), skip first 4, delete the rest
+    ls -t "${WEEKLY_DIR}/${PREFIX}_"*.tar.gz 2>/dev/null | tail -n +5 | xargs -r rm --
 done
+
+# Final cleanup of any stale operations created during this run
+log "INFO: Final cleanup of stale operations..."
+cleanup_stale_operations
 
 log "INFO: === Backup Complete ==="
