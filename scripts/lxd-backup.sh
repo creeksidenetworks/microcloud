@@ -11,6 +11,8 @@ trap 'log "ERROR: Script failed at line $LINENO"' ERR
 # Configuration (can be overridden via environment variables)
 BACKUP_ROOT="${LXD_BACKUP_ROOT:-/mnt/backups}"
 LOG_FILE="${LXD_BACKUP_LOG:-/var/log/lxd-backup.log}"
+# Compression: gzip (slow, good ratio), zstd (fast, good ratio), lz4 (fastest, lower ratio)
+COMPRESSION="${LXD_BACKUP_COMPRESSION:-zstd}"
 MAX_LOG_LINES=5000
 DAILY_DIR="${BACKUP_ROOT}/daily"
 WEEKLY_DIR="${BACKUP_ROOT}/weekly"
@@ -71,7 +73,8 @@ while IFS=, read -r INSTANCE PROJECT; do
     # Note: lxc image export automatically adds .tar.gz extension
     BACKUP_FILE="${DAILY_DIR}/${INSTANCE}_${DATE}"
     
-    if [ -f "${BACKUP_FILE}.tar.gz" ]; then
+    # Check for existing backup (handles both old double-extension and new correct format)
+    if [ -f "${BACKUP_FILE}.tar.gz" ] || [ -f "${BACKUP_FILE}.tar.gz.tar.gz" ]; then
         log "INFO:   > Backup already exists for today. Skipping."
         continue
     fi
@@ -90,8 +93,8 @@ while IFS=, read -r INSTANCE PROJECT; do
     
     # 2. Publish Snapshot to Image
     # Creates a unified image (metadata + rootfs)
-    log "INFO:   > Publishing image (compression in progress)..."
-    if ! timeout 3600 lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression gzip < /dev/null; then
+    log "INFO:   > Publishing image (compression: $COMPRESSION)..."
+    if ! timeout 7200 lxc publish "$INSTANCE/$SNAP_NAME" --alias "$IMG_ALIAS" --project "$PROJECT" --compression "$COMPRESSION" < /dev/null; then
         log "ERROR: Failed to publish image for $INSTANCE. Cleaning up snapshot."
         lxc delete "$INSTANCE/$SNAP_NAME" --project "$PROJECT" >/dev/null 2>&1 || true
         continue
